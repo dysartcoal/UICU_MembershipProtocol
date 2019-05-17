@@ -76,6 +76,7 @@ public:
 	void initMemberListTable(Member *memberNode);
 	void printAddress(Address *addr);
 	virtual ~MP1Node();
+    int sendJOINREP(Address *toaddr);
 };
 
 #endif /* _MP1NODE_H_ */

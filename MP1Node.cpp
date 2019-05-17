@@ -215,9 +215,28 @@ void MP1Node::checkMessages() {
  * DESCRIPTION: Message handler for different message types
  */
 bool MP1Node::recvCallBack(void *env, char *data, int size ) {
+    MessageHdr *msgHdr;
+    Address *peerAddr;
+    long heartbeat;
+    
 	/*
 	 * Your code goes here
 	 */
+
+    peerAddr = new Address();
+    memcpy((char *)&(msgHdr->msgType), (char *)data, sizeof(int));
+    
+    if (msgHdr->msgType == JOINREQ) {
+        memcpy(&(peerAddr->addr), (char *)(data) + sizeof(int), sizeof(peerAddr->addr));
+        memcpy((char *) &heartbeat,  (char *) data + sizeof(int) + sizeof(peerAddr->addr), sizeof(long));
+        sendJOINREP(peerAddr);
+    } else if (msgHdr->msgType == JOINREP) {
+        memcpy(&(peerAddr->addr), (char *)(data) + sizeof(int), sizeof(peerAddr->addr));
+        memcpy((char *) &heartbeat,  (char *) data + sizeof(int) + sizeof(peerAddr->addr), sizeof(long));
+        printf("JOINREP received");
+    }
+    
+    free(peerAddr);
 }
 
 /**
@@ -278,4 +297,39 @@ void MP1Node::printAddress(Address *addr)
 {
     printf("%d.%d.%d.%d:%d \n",  addr->addr[0],addr->addr[1],addr->addr[2],
                                                        addr->addr[3], *(short*)&addr->addr[4]) ;    
+}
+
+/**
+ * FUNCTION NAME: sendJOINREP
+ *
+ * DESCRIPTION: Send JOINREP message response.  The message table is appended after the
+ *              heartbeat.  So message structure is:
+ *                  JOINREP
+ *                  memberNode->addr.addr
+ *                  memberNode->heartbeat
+ *                  memberNode->memberList
+ */
+int MP1Node::sendJOINREP(Address *toaddr) {
+    MessageHdr *msg;
+#ifdef DEBUGLOG
+    static char s[1024];
+#endif
+    
+    size_t msgsize = sizeof(MessageHdr) + sizeof(toaddr->addr) + sizeof(long) + 1;
+    msg = (MessageHdr *) malloc(msgsize * sizeof(char));
+
+    // create JOINREQ message: format of data is {struct Address myaddr}
+    msg->msgType = JOINREP;
+    memcpy((char *)(msg+1), &memberNode->addr.addr, sizeof(memberNode->addr.addr));
+    memcpy((char *)(msg+1) + 1 + sizeof(memberNode->addr.addr), &memberNode->heartbeat, sizeof(long));
+
+#ifdef DEBUGLOG
+    sprintf(s, "Sending join response...");
+    log->LOG(&memberNode->addr, s);
+#endif
+
+    // send JOINREP message to new peer
+    emulNet->ENsend(&memberNode->addr, toaddr, (char *)msg, msgsize);
+
+    free(msg);
 }
