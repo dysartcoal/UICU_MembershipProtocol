@@ -218,7 +218,6 @@ bool MP1Node::recvCallBack(void *env, char *data, int size ) {
     MessageHdr msgHdr;
     Address peeraddr;
     long heartbeat;
-    MemberListEntry peer;
     
 	/*
 	 * Your code goes here
@@ -229,18 +228,13 @@ bool MP1Node::recvCallBack(void *env, char *data, int size ) {
     if (msgHdr.msgType == JOINREQ) {
         memcpy(&(peeraddr.addr), (char *)(data) + sizeof(int), sizeof(peeraddr.addr));
         memcpy((long *) &heartbeat,  (char *) data + sizeof(int) + sizeof(peeraddr.addr), sizeof(long));
-        cout<<"JOINREQ: "<<peeraddr.getAddress() << endl;
+        cout<<"JOINREQ: "<<peeraddr.getAddress() <<" heartbeat: " << heartbeat << endl;
         sendJOINREP(&peeraddr);
-        peer.setid ((int)peeraddr.addr[0]);
-        peer.setport((short)peeraddr.addr[4]);
-        peer.setheartbeat(heartbeat);
-        peer.settimestamp(memberNode->heartbeat);
-        addMember(&peer);
-        log->logNodeAdd(&(memberNode->addr), &peeraddr);
+        addMember(&peeraddr, &heartbeat);
     } else if (msgHdr.msgType == JOINREP) {
         memcpy(&(peeraddr.addr), (char *)(data) + sizeof(int), sizeof(peeraddr.addr));
         memcpy((long *) &heartbeat,  (char *) data + sizeof(int) + sizeof(peeraddr.addr), sizeof(long));
-        cout<<"JOINREP: "<<peeraddr.getAddress() << endl;
+        cout<<"JOINREP: "<<peeraddr.getAddress()  <<" heartbeat: " << heartbeat << endl;
     }
     return 1;
 }
@@ -347,24 +341,31 @@ int MP1Node::sendJOINREP(Address *toaddr) {
  * DESCRIPTION: Add member to member list.
  *
  */
-int MP1Node::addMember(MemberListEntry *peer) {
+int MP1Node::addMember(Address *peeraddr, long *heartbeat) {
     MemberListEntry *mle;
     int i = 0;
     bool found = false;
     
    while (i < memberNode->memberList.size() && not(found)) {
-        if (peer->getid() == memberNode->memberList[i].getid() &&
-            peer->getport() == memberNode->memberList[i].getport()) {
+        if ((int)peeraddr->addr[0] == memberNode->memberList[i].getid() &&
+            (short)peeraddr->addr[4] == memberNode->memberList[i].getport()) {
             cout<<"Found a match in the list"<<endl;
         }
        i++;
     }
+    
     if (found) {
-        
+        // Update existing member
+        memberNode->memberList[i].setheartbeat(*heartbeat);
+        memberNode->memberList[i].settimestamp(memberNode->heartbeat);
     } else {
+        // Add new member to the list
         mle = (MemberListEntry *) malloc (sizeof(MemberListEntry));
-        memcpy((MemberListEntry *) mle, peer, sizeof(MemberListEntry));
+        mle->setid ((int)peeraddr->addr[0]);
+        mle->setport((short)peeraddr->addr[4]);
+        mle->setheartbeat(*heartbeat);
+        mle->settimestamp(memberNode->heartbeat);
         memberNode->memberList.push_back(*mle);
-
+        log->logNodeAdd(&(memberNode->addr), peeraddr);
     }
 }
