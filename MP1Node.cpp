@@ -215,28 +215,34 @@ void MP1Node::checkMessages() {
  * DESCRIPTION: Message handler for different message types
  */
 bool MP1Node::recvCallBack(void *env, char *data, int size ) {
-    MessageHdr *msgHdr;
-    Address *peerAddr;
+    MessageHdr msgHdr;
+    Address peeraddr;
     long heartbeat;
+    MemberListEntry peer;
     
 	/*
 	 * Your code goes here
 	 */
 
-    peerAddr = new Address();
-    memcpy((char *)&(msgHdr->msgType), (char *)data, sizeof(int));
+    memcpy((char *)&(msgHdr.msgType), (char *)data, sizeof(int));
     
-    if (msgHdr->msgType == JOINREQ) {
-        memcpy(&(peerAddr->addr), (char *)(data) + sizeof(int), sizeof(peerAddr->addr));
-        memcpy((char *) &heartbeat,  (char *) data + sizeof(int) + sizeof(peerAddr->addr), sizeof(long));
-        sendJOINREP(peerAddr);
-    } else if (msgHdr->msgType == JOINREP) {
-        memcpy(&(peerAddr->addr), (char *)(data) + sizeof(int), sizeof(peerAddr->addr));
-        memcpy((char *) &heartbeat,  (char *) data + sizeof(int) + sizeof(peerAddr->addr), sizeof(long));
-        printf("JOINREP received");
+    if (msgHdr.msgType == JOINREQ) {
+        memcpy(&(peeraddr.addr), (char *)(data) + sizeof(int), sizeof(peeraddr.addr));
+        memcpy((long *) &heartbeat,  (char *) data + sizeof(int) + sizeof(peeraddr.addr), sizeof(long));
+        cout<<"JOINREQ: "<<peeraddr.getAddress() << endl;
+        sendJOINREP(&peeraddr);
+        peer.setid ((int)peeraddr.addr[0]);
+        peer.setport((short)peeraddr.addr[4]);
+        peer.setheartbeat(heartbeat);
+        peer.settimestamp(memberNode->heartbeat);
+        addMember(&peer);
+        log->logNodeAdd(&(memberNode->addr), &peeraddr);
+    } else if (msgHdr.msgType == JOINREP) {
+        memcpy(&(peeraddr.addr), (char *)(data) + sizeof(int), sizeof(peeraddr.addr));
+        memcpy((long *) &heartbeat,  (char *) data + sizeof(int) + sizeof(peeraddr.addr), sizeof(long));
+        cout<<"JOINREP: "<<peeraddr.getAddress() << endl;
     }
-    
-    free(peerAddr);
+    return 1;
 }
 
 /**
@@ -318,7 +324,7 @@ int MP1Node::sendJOINREP(Address *toaddr) {
     size_t msgsize = sizeof(MessageHdr) + sizeof(toaddr->addr) + sizeof(long) + 1;
     msg = (MessageHdr *) malloc(msgsize * sizeof(char));
 
-    // create JOINREQ message: format of data is {struct Address myaddr}
+    // create JOINREP message: format of data is
     msg->msgType = JOINREP;
     memcpy((char *)(msg+1), &memberNode->addr.addr, sizeof(memberNode->addr.addr));
     memcpy((char *)(msg+1) + 1 + sizeof(memberNode->addr.addr), &memberNode->heartbeat, sizeof(long));
@@ -332,4 +338,33 @@ int MP1Node::sendJOINREP(Address *toaddr) {
     emulNet->ENsend(&memberNode->addr, toaddr, (char *)msg, msgsize);
 
     free(msg);
+}
+
+
+/**
+ * FUNCTION NAME: addMember
+ *
+ * DESCRIPTION: Add member to member list.
+ *
+ */
+int MP1Node::addMember(MemberListEntry *peer) {
+    MemberListEntry *mle;
+    int i = 0;
+    bool found = false;
+    
+   while (i < memberNode->memberList.size() && not(found)) {
+        if (peer->getid() == memberNode->memberList[i].getid() &&
+            peer->getport() == memberNode->memberList[i].getport()) {
+            cout<<"Found a match in the list"<<endl;
+        }
+       i++;
+    }
+    if (found) {
+        
+    } else {
+        mle = (MemberListEntry *) malloc (sizeof(MemberListEntry));
+        memcpy((MemberListEntry *) mle, peer, sizeof(MemberListEntry));
+        memberNode->memberList.push_back(*mle);
+
+    }
 }
