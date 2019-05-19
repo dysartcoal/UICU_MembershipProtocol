@@ -76,8 +76,10 @@ public:
 	void initMemberListTable(Member *memberNode);
 	void printAddress(Address *addr);
 	virtual ~MP1Node();
-    int sendJOINREP(Address *toaddr);
-    int addMember(Address *peeraddr, long *heartbeat);
+    void getSenderInfo(char *data, MessageHdr *msgHdr, Address *addr, long *heartbeat);
+    MemberListEntry createMLEFromValues(Address *addr, long *heartbeat, long *timestamp);
+    void getValuesFromMLE(MemberListEntry *mle, Address *addr, long *heartbeat, long *timestamp);
+    int addMember(MemberListEntry *peer);
 };
 
 #endif /* _MP1NODE_H_ */
