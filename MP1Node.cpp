@@ -119,6 +119,7 @@ int MP1Node::initThisNode(Address *joinaddr) {
  */
 int MP1Node::introduceSelfToGroup(Address *joinaddr) {
 	MessageHdr *msg;
+    char *ptr;
 #ifdef DEBUGLOG
     static char s[1024];
 #endif
@@ -135,11 +136,17 @@ int MP1Node::introduceSelfToGroup(Address *joinaddr) {
         msg = (MessageHdr *) malloc(msgsize * sizeof(char));
 
         // create JOINREQ message: format of data is {struct Address myaddr}
+        /*
         msg->msgType = JOINREQ;
         memcpy((char *)(msg+1), &memberNode->addr.addr, sizeof(memberNode->addr.addr));
         memcpy((char *)(msg+1) + 1 + sizeof(memberNode->addr.addr), &memberNode->heartbeat, sizeof(long));
+         */
+        
+        createMessageHdr(msg, JOINREQ, &memberNode->addr, &memberNode->heartbeat, &ptr);
         
         cout<<"Sending JOINREQ: "<< memberNode->addr.addr <<" heartbeat: " << memberNode->heartbeat << endl;
+        printf("msg starting address: %p\n", (char *) msg);
+        printf("ptr end address: %p\n", (char *) ptr);
 
 #ifdef DEBUGLOG
         sprintf(s, "Trying to join...");
@@ -223,29 +230,40 @@ bool MP1Node::recvCallBack(void *env, char *data, int size ) {
     MessageHdr msgHdr;
     Address peeraddr;
     long heartbeat;
-    MemberListEntry mle;
+    MemberListEntry *mle;
+    Address addr;
+    int membercnt = 0;
+    char *ptr;
     
-    getSenderInfo(data, &msgHdr, &peeraddr, &heartbeat);
+    getSenderInfo(data, &msgHdr, &peeraddr, &heartbeat, &ptr);
     
     if (msgHdr.msgType == JOINREQ) {
         cout<<"JOINREQ: "<<peeraddr.getAddress() <<" heartbeat: " << heartbeat << endl;
-        mle = createMLEFromValues(&peeraddr, &heartbeat, &memberNode->heartbeat);
-        addMember(&mle);
-        //sendJOINREP(&peeraddr, memberNode->memberList);
+        mle = (MemberListEntry *) malloc(sizeof(MemberListEntry));
+        updateMLEFromValues(mle, &peeraddr, &heartbeat, &memberNode->heartbeat);
+        addMember(mle);
+        sendJOINREP(&peeraddr, memberNode->memberList);
         //sendJOINREP(&peeraddr);
         
     } else if (msgHdr.msgType == JOINREP) {
         cout<<"JOINREP: "<<peeraddr.getAddress()  <<" heartbeat: " << heartbeat << endl;
-        /*
+        
         // The MemberListEntry items are appended to the end of the message.
         // Work out how many there are.
         membercnt = (size - sizeof(int) - sizeof(peeraddr.addr) - sizeof(long))/sizeof(MemberListEntry);
-        mle = (MemberListEntry *) malloc(sizeof(MemberListEntry));
+        
         for (int i = 0; i < membercnt; i++) {
-            memcpy((MemberListEntry *)mle, (char *) data + sizeof(int) + sizeof(peeraddr.addr) + sizeof(long)
-                   + i*sizeof(MemberListEntry), sizeof(MemberListEntry));
-         */
+            mle = (MemberListEntry *) malloc(sizeof(MemberListEntry));
+            mle->setid((int) *ptr);
+            ptr += sizeof(int);
+            mle->setport((short) *ptr);
+            ptr += sizeof(short);
+            mle->setheartbeat((long) *ptr);
+            ptr += sizeof(long);
+            mle->settimestamp(memberNode->heartbeat);
+            addMember(mle);
         }
+    }
     
 }
 
@@ -314,37 +332,42 @@ void MP1Node::printAddress(Address *addr)
  *
  * DESCRIPTION: Get the message type, peer address and heartbeat information.
  */
-void MP1Node::getSenderInfo(char *data, MessageHdr *msgHdr, Address *addr, long *heartbeat){
+void MP1Node::getSenderInfo(char *data, MessageHdr *msgHdr, Address *addr, long *heartbeat, char **endptr){
 
+    *endptr = (char *)data;
+    
     memcpy(msgHdr, data, sizeof(int));
+    *endptr +=  sizeof(int);
     memcpy(&(addr->addr), (char *) data + sizeof(int), sizeof(addr->addr));
+    *endptr +=  sizeof(addr->addr);
     memcpy((long *) heartbeat, (char *)(data) + sizeof(int) + 1 + sizeof(addr->addr), sizeof(long));
+    *endptr +=  1 + sizeof(long);
 
 }
 
 /**
  * FUNCTION NAME: createMLEFromValues
  *
- * DESCRIPTION: Add member to member list.
+ * DESCRIPTION: Create a MemberListEntry object with the address, heartbeat and timestamp supplied.
+ *              Memory should already have been allocated for the MemberListEntry object.
  *
  */
-MemberListEntry MP1Node::createMLEFromValues(Address *addr, long *heartbeat, long *timestamp){
-    MemberListEntry mle;
+int MP1Node::updateMLEFromValues(MemberListEntry *mle, Address *addr, long *heartbeat, long *timestamp){
     
-    memset(&mle, 0, sizeof(MemberListEntry));
+    //memset(mle, 0, sizeof(MemberListEntry));
     
-    mle.setid ((int)addr->addr[0]);
-    mle.setport((short)addr->addr[4]);
-    mle.setheartbeat(*heartbeat);
-    mle.settimestamp(*timestamp);
+    mle->setid ((int)addr->addr[0]);
+    mle->setport((short)addr->addr[4]);
+    mle->setheartbeat(*heartbeat);
+    mle->settimestamp(*timestamp);
     
-    return mle;
+    return 1;
 }
 
 /**
- * FUNCTION NAME: createMLEFromValues
+ * FUNCTION NAME: getValuesFromMLE
  *
- * DESCRIPTION: Add member to member list.
+ * DESCRIPTION: Get the address, heartbeat and timestamp from the MemberListEntry.
  *
  */
 void MP1Node::getValuesFromMLE(MemberListEntry *mle, Address *addr, long *heartbeat, long *timestamp){
@@ -398,3 +421,72 @@ int MP1Node::addMember(MemberListEntry *peer) {
     return 1;
 }
 
+/**
+ * FUNCTION NAME: createMsgHeader
+ *
+ * DESCRIPTION: Create a message header for the current member.  Memory for the message should
+ *              have already been allocated.
+ *
+ */
+int MP1Node::createMessageHdr(MessageHdr *msg, MsgTypes msgtype, Address *addr, long *heartbeat, char **endptr){
+    
+    *endptr = (char *)msg; // endptr points to the current end of data
+    printf("msg start address: %p\n", (char *) msg);
+    printf("endptr start address: %p\n", (char *) *endptr);
+    
+    msg->msgType = msgtype;
+    *endptr +=  sizeof(int);
+    memcpy((char *)(msg+1), addr->addr, sizeof(addr->addr));
+    *endptr += sizeof(addr->addr) + 1;
+    memcpy((char *)(msg+1) + 1 + sizeof(addr->addr), heartbeat, sizeof(long));
+    *endptr += sizeof(long);
+    printf("endptr end address in createMessageHdr: %p\n", (char *) *endptr);
+     
+}
+
+/**
+ * FUNCTION NAME: sendJOINREP
+ *
+ * DESCRIPTION: Send JOINREP message response.  The message table is appended after the
+ *              heartbeat.  So message structure is:
+ *                  JOINREP
+ *                  memberNode->addr.addr
+ *                  memberNode->heartbeat
+ *                  memberNode->memberList
+ */
+int MP1Node::sendJOINREP(Address *toaddr, std::vector<MemberListEntry> ml) {
+    MessageHdr *msg;
+    char *ptr;
+    MemberListEntry *mle;
+#ifdef DEBUGLOG
+    static char s[1024];
+#endif
+    
+    size_t msgsize = sizeof(MessageHdr) + sizeof(toaddr->addr) + sizeof(long) + 1
+    + sizeof(MemberListEntry)*ml.size();
+    msg = (MessageHdr *) malloc(msgsize * sizeof(char));
+    
+    // create JOINREP message: format of data is
+    createMessageHdr(msg, JOINREP, &memberNode->addr, &memberNode->heartbeat, &ptr);
+    for (int i = 0; i < ml.size(); i++) {
+        mle = &ml[i];
+        *ptr = (int) mle->getid();
+        ptr += sizeof(int);
+        *ptr = (short) mle->getport();
+        ptr += sizeof(short);
+        *ptr = (long) mle->getheartbeat();
+        ptr += sizeof(long);
+    }
+
+    
+    cout << "Sending JOINREP: " << memberNode->addr.addr <<" heartbeat: " << memberNode->heartbeat << endl;
+#ifdef DEBUGLOG
+    sprintf(s, "Sending join response...");
+    log->LOG(&memberNode->addr, s);
+#endif
+    
+    // send JOINREP message to new peer
+    emulNet->ENsend(&memberNode->addr, toaddr, (char *)msg, msgsize);
+    
+    free(msg);
+}
