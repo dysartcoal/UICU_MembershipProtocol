@@ -185,6 +185,8 @@ void MP1Node::nodeLoop() {
     	return;
     }
 
+    memberNode->heartbeat++;
+    
     // Check my messages
     checkMessages();
 
@@ -249,6 +251,31 @@ bool MP1Node::recvCallBack(void *env, char *data, int size ) {
         
     } else if (msgHdr.msgType == JOINREP) {
         cout<<"JOINREP: "<<peeraddr.getAddress()  <<" heartbeat: " << heartbeat << endl;
+#ifdef DEBUGLOG
+        log->LOG(&memberNode->addr, "Joining a group...");
+#endif
+        memberNode->inGroup = true;
+        
+        // The MemberListEntry items are appended to the end of the message.
+        // Work out how many there are.
+        membercnt = (size - sizeof(int) - sizeof(peeraddr.addr) - sizeof(long))/sizeof(MemberListEntry);
+        
+        for (int i = 0; i < membercnt; i++) {
+            mle = (MemberListEntry *) malloc(sizeof(MemberListEntry));
+            mle->setid((int) *ptr);
+            ptr += sizeof(int);
+            mle->setport((short) *ptr);
+            ptr += sizeof(short);
+            mle->setheartbeat((long) *ptr);
+            ptr += sizeof(long);
+            mle->settimestamp(memberNode->heartbeat);
+            addMember(mle);
+        }
+    } else if (msgHdr.msgType == PING) {
+        cout<<"PING: "<<peeraddr.getAddress()  <<" heartbeat: " << heartbeat << endl;
+    #ifdef DEBUGLOG
+        log->LOG(&memberNode->addr, "Received a ping...");
+    #endif
         
         // The MemberListEntry items are appended to the end of the message.
         // Work out how many there are.
@@ -267,6 +294,8 @@ bool MP1Node::recvCallBack(void *env, char *data, int size ) {
         }
     }
     
+    return true;
+    
 }
 
 /**
@@ -277,6 +306,8 @@ bool MP1Node::recvCallBack(void *env, char *data, int size ) {
  * 				Propagate your membership list
  */
 void MP1Node::nodeLoopOps() {
+    int toind;
+    Address toaddr;
 
     if (memberNode->timeOutCounter > 0)  {
         memberNode->timeOutCounter--;
@@ -294,21 +325,28 @@ void MP1Node::nodeLoopOps() {
             }
         }
         
-        if (memberNode->timeOutCounter == 0) {
-            // Check for outstanding indpings
-            // If outstanding indping
-            //      - delete the member from the member table
-            //      - add member to Failed list
-            //      - reset timeOutCounter
-            //      - reset pingCounter
-            //      - send out ping to random
-            //      - add ping to ping table
+    }
+    
+    if (memberNode->timeOutCounter <= 0) {
+        memberNode->timeOutCounter = TIMEOUT;
+        memberNode->pingCounter = TFAIL;
+        toind = rand() % memberNode->memberList.size();
+        while (memberNode->memberList[toind].getid() == *(int *)(memberNode->addr.addr)) {
+            toind = rand() % memberNode->memberList.size();
         }
+
+        *(int *)(&toaddr.addr)= (int) memberNode->memberList[toind].getid() ;
+        *(short *)(&toaddr.addr[4]) = (short) memberNode->memberList[toind].getport();
+        sendPING(&toaddr, memberNode->memberList);
         
-    } else {
-        //      - reset timeOutCounter
-        //      - reset pingCounter
+        
+        
+        // Check for outstanding indpings
+        // If outstanding indping
+        //      - delete the member from the member table
+        //      - add member to Failed list
         //      - send out ping to random
+        //      - add ping to ping table
     }
     
 
@@ -397,7 +435,7 @@ void MP1Node::getSenderInfo(char *data, MessageHdr *msgHdr, Address *addr, long 
  *              Memory should already have been allocated for the MemberListEntry object.
  *
  */
-int MP1Node::updateMLEFromValues(MemberListEntry *mle, Address *addr, long *heartbeat, long *timestamp){
+void MP1Node::updateMLEFromValues(MemberListEntry *mle, Address *addr, long *heartbeat, long *timestamp){
     
     //memset(mle, 0, sizeof(MemberListEntry));
     
@@ -406,7 +444,7 @@ int MP1Node::updateMLEFromValues(MemberListEntry *mle, Address *addr, long *hear
     mle->setheartbeat(*heartbeat);
     mle->settimestamp(*timestamp);
     
-    return 1;
+    return;
 }
 
 /**
@@ -417,8 +455,8 @@ int MP1Node::updateMLEFromValues(MemberListEntry *mle, Address *addr, long *hear
  */
 void MP1Node::getValuesFromMLE(MemberListEntry *mle, Address *addr, long *heartbeat, long *timestamp){
 
-    addr->addr[0] = (int)mle->getid();
-    addr->addr[4] = (short)mle->getport();
+    *(int *)(addr->addr)= (int)mle->getid();
+    *(short *)(&addr->addr[4]) = (short)mle->getport();
     *heartbeat = mle->getheartbeat();
     *timestamp = mle->gettimestamp();
 
@@ -431,7 +469,7 @@ void MP1Node::getValuesFromMLE(MemberListEntry *mle, Address *addr, long *heartb
  * DESCRIPTION: Add member to member list.
  *
  */
-int MP1Node::addMember(MemberListEntry *peer) {
+void MP1Node::addMember(MemberListEntry *peer) {
     MemberListEntry *mle;
     Address peeraddr;
     int i = 0;
@@ -463,7 +501,7 @@ int MP1Node::addMember(MemberListEntry *peer) {
         log->logNodeAdd(&(memberNode->addr), &peeraddr );
     }
     
-    return 1;
+    return;
 }
 
 /**
@@ -473,11 +511,9 @@ int MP1Node::addMember(MemberListEntry *peer) {
  *              have already been allocated.
  *
  */
-int MP1Node::createMessageHdr(MessageHdr *msg, MsgTypes msgtype, Address *addr, long *heartbeat, char **endptr){
+void MP1Node::createMessageHdr(MessageHdr *msg, MsgTypes msgtype, Address *addr, long *heartbeat, char **endptr){
     
     *endptr = (char *)msg; // endptr points to the current end of data
-    printf("msg start address: %p\n", (char *) msg);
-    printf("endptr start address: %p\n", (char *) *endptr);
     
     msg->msgType = msgtype;
     *endptr +=  sizeof(int);
@@ -485,8 +521,8 @@ int MP1Node::createMessageHdr(MessageHdr *msg, MsgTypes msgtype, Address *addr, 
     *endptr += sizeof(addr->addr) + 1;
     memcpy((char *)(msg+1) + 1 + sizeof(addr->addr), heartbeat, sizeof(long));
     *endptr += sizeof(long);
-    printf("endptr end address in createMessageHdr: %p\n", (char *) *endptr);
-     
+    
+    return;
 }
 
 /**
@@ -499,7 +535,7 @@ int MP1Node::createMessageHdr(MessageHdr *msg, MsgTypes msgtype, Address *addr, 
  *                  memberNode->heartbeat
  *                  memberNode->memberList
  */
-int MP1Node::sendJOINREP(Address *toaddr, std::vector<MemberListEntry> ml) {
+void MP1Node::sendJOINREP(Address *toaddr, std::vector<MemberListEntry> ml) {
     MessageHdr *msg;
     char *ptr;
     MemberListEntry *mle;
@@ -534,4 +570,55 @@ int MP1Node::sendJOINREP(Address *toaddr, std::vector<MemberListEntry> ml) {
     emulNet->ENsend(&memberNode->addr, toaddr, (char *)msg, msgsize);
     
     free(msg);
+    
+    return;
+}
+
+/**
+ * FUNCTION NAME: sendPING
+ *
+ * DESCRIPTION: Send PING message.   The message structure is:
+ *                  PING
+ *                  memberNode->addr.addr
+ *                  memberNode->heartbeat
+ *                  FAILED
+ *                  failedpeer->addr
+ */
+void MP1Node::sendPING(Address *toaddr, std::vector<MemberListEntry> ml) {
+    MessageHdr *msg;
+    char *ptr;
+    MemberListEntry *mle;
+#ifdef DEBUGLOG
+    static char s[1024];
+#endif
+    
+    size_t msgsize = sizeof(MessageHdr) + sizeof(toaddr->addr) + sizeof(long) + 1
+    + sizeof(MemberListEntry)*ml.size();
+    msg = (MessageHdr *) malloc(msgsize * sizeof(char));
+    
+    // create PING message: format of data is
+    createMessageHdr(msg, PING, &memberNode->addr, &memberNode->heartbeat, &ptr);
+    for (int i = 0; i < ml.size(); i++) {
+        mle = &ml[i];
+        *ptr = (int) mle->getid();
+        ptr += sizeof(int);
+        *ptr = (short) mle->getport();
+        ptr += sizeof(short);
+        *ptr = (long) mle->getheartbeat();
+        ptr += sizeof(long);
+    }
+    
+    
+    cout << "Sending PING: " << memberNode->addr.addr <<" heartbeat: " << memberNode->heartbeat << endl;
+#ifdef DEBUGLOG
+    sprintf(s, "Sending ping...");
+    log->LOG(&memberNode->addr, s);
+#endif
+    
+    // send JOINREP message to new peer
+    emulNet->ENsend(&memberNode->addr, toaddr, (char *)msg, msgsize);
+    
+    free(msg);
+    
+    return;
 }

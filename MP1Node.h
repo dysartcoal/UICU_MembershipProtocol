@@ -89,11 +89,12 @@ public:
 	void printAddress(Address *addr);
 	virtual ~MP1Node();
     void getSenderInfo(char *data, MessageHdr *msgHdr, Address *addr, long *heartbeat, char **endptr);
-    int updateMLEFromValues(MemberListEntry *mle, Address *addr, long *heartbeat, long *timestamp);
+    void updateMLEFromValues(MemberListEntry *mle, Address *addr, long *heartbeat, long *timestamp);
     void getValuesFromMLE(MemberListEntry *mle, Address *addr, long *heartbeat, long *timestamp);
-    int addMember(MemberListEntry *peer);
-    int createMessageHdr(MessageHdr *msg, MsgTypes msgtype, Address *addr, long *heartbeat, char **endptr);
-    int sendJOINREP(Address *toaddr, std::vector<MemberListEntry> ml);
+    void addMember(MemberListEntry *peer);
+    void createMessageHdr(MessageHdr *msg, MsgTypes msgtype, Address *addr, long *heartbeat, char **endptr);
+    void sendJOINREP(Address *toaddr, std::vector<MemberListEntry> ml);
+    void sendPING(Address *toaddr, std::vector<MemberListEntry> ml);
 };
 
 #endif /* _MP1NODE_H_ */
