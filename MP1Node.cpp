@@ -27,7 +27,6 @@ MP1Node::MP1Node(Member *member, Params *params, EmulNet *emul, Log *log, Addres
 	this->memberNode->addr = *address;
     memset(&this->ping.addr, 0, sizeof(char[6]));
     memset(&this->indping.addr, 0, sizeof(char[6]));
-    initFailedList();
 }
 
 /**
@@ -111,6 +110,7 @@ int MP1Node::initThisNode(Address *joinaddr) {
 	memberNode->pingCounter = TFAIL;
 	memberNode->timeOutCounter = -1;
     initMemberListTable(memberNode);
+    initFailedList();
 
     return 0;
 }
@@ -123,6 +123,8 @@ int MP1Node::initThisNode(Address *joinaddr) {
 int MP1Node::introduceSelfToGroup(Address *joinaddr) {
 	MessageHdr *msg;
     char *ptr;
+    MemberListEntry *mle;
+    
 #ifdef DEBUGLOG
     static char s[1024];
 #endif
@@ -133,6 +135,10 @@ int MP1Node::introduceSelfToGroup(Address *joinaddr) {
         log->LOG(&memberNode->addr, "Starting up group...");
 #endif
         memberNode->inGroup = true;
+        mle = (MemberListEntry *) malloc(sizeof(MemberListEntry));
+        updateMLEFromValues(mle, &(memberNode->addr), &memberNode->heartbeat, &memberNode->heartbeat);
+        addMember(mle);
+        free(mle);
     }
     else {
         size_t msgsize = sizeof(MessageHdr) + sizeof(joinaddr->addr) + sizeof(long) + 1;
@@ -246,6 +252,7 @@ bool MP1Node::recvCallBack(void *env, char *data, int size ) {
         mle = (MemberListEntry *) malloc(sizeof(MemberListEntry));
         updateMLEFromValues(mle, &peeraddr, &heartbeat, &memberNode->heartbeat);
         addMember(mle);
+        free(mle);
         sendJOINREP(&peeraddr, memberNode->memberList);
         //sendJOINREP(&peeraddr);
         
@@ -260,8 +267,8 @@ bool MP1Node::recvCallBack(void *env, char *data, int size ) {
         // Work out how many there are.
         membercnt = (size - sizeof(int) - sizeof(peeraddr.addr) - sizeof(long))/sizeof(MemberListEntry);
         
+        mle = (MemberListEntry *) malloc(sizeof(MemberListEntry));
         for (int i = 0; i < membercnt; i++) {
-            mle = (MemberListEntry *) malloc(sizeof(MemberListEntry));
             mle->setid((int) *ptr);
             ptr += sizeof(int);
             mle->setport((short) *ptr);
@@ -271,27 +278,17 @@ bool MP1Node::recvCallBack(void *env, char *data, int size ) {
             mle->settimestamp(memberNode->heartbeat);
             addMember(mle);
         }
+        free(mle);
     } else if (msgHdr.msgType == PING) {
         cout<<"PING: "<<peeraddr.getAddress()  <<" heartbeat: " << heartbeat << endl;
     #ifdef DEBUGLOG
         log->LOG(&memberNode->addr, "Received a ping...");
     #endif
         
-        // The MemberListEntry items are appended to the end of the message.
-        // Work out how many there are.
-        membercnt = (size - sizeof(int) - sizeof(peeraddr.addr) - sizeof(long))/sizeof(MemberListEntry);
-        
-        for (int i = 0; i < membercnt; i++) {
-            mle = (MemberListEntry *) malloc(sizeof(MemberListEntry));
-            mle->setid((int) *ptr);
-            ptr += sizeof(int);
-            mle->setport((short) *ptr);
-            ptr += sizeof(short);
-            mle->setheartbeat((long) *ptr);
-            ptr += sizeof(long);
-            mle->settimestamp(memberNode->heartbeat);
-            addMember(mle);
-        }
+        mle = (MemberListEntry *) malloc(sizeof(MemberListEntry));
+        updateMLEFromValues(mle, &peeraddr, &heartbeat, &memberNode->heartbeat);
+        addMember(mle);
+        free(mle);
     }
     
     return true;
@@ -622,3 +619,4 @@ void MP1Node::sendPING(Address *toaddr, std::vector<MemberListEntry> ml) {
     
     return;
 }
+
