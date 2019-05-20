@@ -25,6 +25,9 @@ MP1Node::MP1Node(Member *member, Params *params, EmulNet *emul, Log *log, Addres
 	this->log = log;
 	this->par = params;
 	this->memberNode->addr = *address;
+    memset(&this->ping.addr, 0, sizeof(char[6]));
+    memset(&this->indping.addr, 0, sizeof(char[6]));
+    initFailedList();
 }
 
 /**
@@ -143,10 +146,7 @@ int MP1Node::introduceSelfToGroup(Address *joinaddr) {
          */
         
         createMessageHdr(msg, JOINREQ, &memberNode->addr, &memberNode->heartbeat, &ptr);
-        
         cout<<"Sending JOINREQ: "<< memberNode->addr.addr <<" heartbeat: " << memberNode->heartbeat << endl;
-        printf("msg starting address: %p\n", (char *) msg);
-        printf("ptr end address: %p\n", (char *) ptr);
 
 #ifdef DEBUGLOG
         sprintf(s, "Trying to join...");
@@ -236,6 +236,8 @@ bool MP1Node::recvCallBack(void *env, char *data, int size ) {
     char *ptr;
     
     getSenderInfo(data, &msgHdr, &peeraddr, &heartbeat, &ptr);
+    cout << "memberNode address: " << memberNode->addr.getAddress() << " Curr Time: " << this->par->getcurrtime() << endl;
+    cout << "memberNode pingcounter: " << memberNode->pingCounter << " Timeoutcounter: " << memberNode->timeOutCounter << endl;
     
     if (msgHdr.msgType == JOINREQ) {
         cout<<"JOINREQ: "<<peeraddr.getAddress() <<" heartbeat: " << heartbeat << endl;
@@ -276,6 +278,40 @@ bool MP1Node::recvCallBack(void *env, char *data, int size ) {
  */
 void MP1Node::nodeLoopOps() {
 
+    if (memberNode->timeOutCounter > 0)  {
+        memberNode->timeOutCounter--;
+        
+        if (memberNode->pingCounter > 0) {
+            memberNode->pingCounter--;
+            
+            if (memberNode->pingCounter == 0){
+                // Check for outstanding pings
+                // If outstanding ping
+                //          - check for any joins or faileds
+                //          - send indping with piggybacked joins and fails
+                //          - add indping to indping table
+                //          - delete the joins and fails that were piggybacked
+            }
+        }
+        
+        if (memberNode->timeOutCounter == 0) {
+            // Check for outstanding indpings
+            // If outstanding indping
+            //      - delete the member from the member table
+            //      - add member to Failed list
+            //      - reset timeOutCounter
+            //      - reset pingCounter
+            //      - send out ping to random
+            //      - add ping to ping table
+        }
+        
+    } else {
+        //      - reset timeOutCounter
+        //      - reset pingCounter
+        //      - send out ping to random
+    }
+    
+
 	/*
 	 * Your code goes here
 	 */
@@ -313,7 +349,16 @@ Address MP1Node::getJoinAddress() {
  * DESCRIPTION: Initialize the membership list
  */
 void MP1Node::initMemberListTable(Member *memberNode) {
-	memberNode->memberList.clear();
+    memberNode->memberList.clear();
+}
+
+/**
+ * FUNCTION NAME: initFailedList
+ *
+ * DESCRIPTION: Initialize the failed list
+ */
+void MP1Node::initFailedList() {
+    this->failedList.clear();
 }
 
 /**

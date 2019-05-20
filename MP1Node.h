@@ -20,6 +20,7 @@
  */
 #define TREMOVE 20
 #define TFAIL 5
+#define TIMEOUT 15
 
 /*
  * Note: You can change/add any functions in MP1Node.{h,cpp}
@@ -31,6 +32,12 @@
 enum MsgTypes{
     JOINREQ,
     JOINREP,
+    PING,
+    INDPING,
+    PINGREP,
+    INDPINGREP,
+    JOINED,
+    FAILED,
     DUMMYLASTMSGTYPE
 };
 
@@ -55,6 +62,10 @@ private:
 	Params *par;
 	Member *memberNode;
 	char NULLADDR[6];
+    Address ping;
+    Address indping;
+    // Membership table
+    vector<Address> failedList;
 
 public:
 	MP1Node(Member *, Params *, EmulNet *, Log *, Address *);
@@ -74,6 +85,7 @@ public:
 	int isNullAddress(Address *addr);
 	Address getJoinAddress();
 	void initMemberListTable(Member *memberNode);
+    void initFailedList();
 	void printAddress(Address *addr);
 	virtual ~MP1Node();
     void getSenderInfo(char *data, MessageHdr *msgHdr, Address *addr, long *heartbeat, char **endptr);
