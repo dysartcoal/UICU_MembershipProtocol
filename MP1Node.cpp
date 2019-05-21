@@ -20,13 +20,15 @@ MP1Node::MP1Node(Member *member, Params *params, EmulNet *emul, Log *log, Addres
 	for( int i = 0; i < 6; i++ ) {
 		NULLADDR[i] = 0;
 	}
+    
 	this->memberNode = member;
 	this->emulNet = emul;
 	this->log = log;
 	this->par = params;
 	this->memberNode->addr = *address;
-    memset(&this->ping.addr, 0, sizeof(char[6]));
-    memset(&this->indping.addr, 0, sizeof(char[6]));
+    this->pingList.clear();
+    this->indpingList.clear();
+    this->failedList.clear();
 }
 
 /**
@@ -110,7 +112,6 @@ int MP1Node::initThisNode(Address *joinaddr) {
 	memberNode->pingCounter = TFAIL;
 	memberNode->timeOutCounter = -1;
     initMemberListTable(memberNode);
-    initFailedList();
 
     return 0;
 }
@@ -151,7 +152,7 @@ int MP1Node::introduceSelfToGroup(Address *joinaddr) {
         memcpy((char *)(msg+1) + 1 + sizeof(memberNode->addr.addr), &memberNode->heartbeat, sizeof(long));
          */
         
-        createMessageHdr(msg, JOINREQ, &memberNode->addr, &memberNode->heartbeat, &ptr);
+        createMessageHdr(msg, JOINREQ, &memberNode->addr, memberNode->heartbeat, &ptr);
         cout<<"Sending JOINREQ: "<< memberNode->addr.addr <<" heartbeat: " << memberNode->heartbeat << endl;
 
 #ifdef DEBUGLOG
@@ -178,6 +179,9 @@ int MP1Node::finishUpThisNode(){
    /*
     * Your code goes here
     */
+    this->pingList.clear();
+    this->indpingList.clear();
+    this->failedList.clear();
 }
 
 /**
@@ -244,15 +248,14 @@ bool MP1Node::recvCallBack(void *env, char *data, int size ) {
     char *ptr;
     
     getSenderInfo(data, &msgHdr, &peeraddr, &heartbeat, &ptr);
+    mle = (MemberListEntry *) malloc(sizeof(MemberListEntry));
     cout << "memberNode address: " << memberNode->addr.getAddress() << " Curr Time: " << this->par->getcurrtime() << endl;
     cout << "memberNode pingcounter: " << memberNode->pingCounter << " Timeoutcounter: " << memberNode->timeOutCounter << endl;
     
     if (msgHdr.msgType == JOINREQ) {
         cout<<"JOINREQ: "<<peeraddr.getAddress() <<" heartbeat: " << heartbeat << endl;
-        mle = (MemberListEntry *) malloc(sizeof(MemberListEntry));
         updateMLEFromValues(mle, &peeraddr, &heartbeat, &memberNode->heartbeat);
         addMember(mle);
-        free(mle);
         sendJOINREP(&peeraddr, memberNode->memberList);
         //sendJOINREP(&peeraddr);
         
@@ -265,9 +268,9 @@ bool MP1Node::recvCallBack(void *env, char *data, int size ) {
         
         // The MemberListEntry items are appended to the end of the message.
         // Work out how many there are.
-        membercnt = (size - sizeof(int) - sizeof(peeraddr.addr) - sizeof(long))/sizeof(MemberListEntry);
+        membercnt = (size - sizeof(int) - sizeof(peeraddr.addr) - sizeof(long))/(sizeof(int)+sizeof(short)+sizeof(long));
         
-        mle = (MemberListEntry *) malloc(sizeof(MemberListEntry));
+       
         for (int i = 0; i < membercnt; i++) {
             mle->setid((int) *ptr);
             ptr += sizeof(int);
@@ -278,19 +281,28 @@ bool MP1Node::recvCallBack(void *env, char *data, int size ) {
             mle->settimestamp(memberNode->heartbeat);
             addMember(mle);
         }
-        free(mle);
     } else if (msgHdr.msgType == PING) {
         cout<<"PING: "<<peeraddr.getAddress()  <<" heartbeat: " << heartbeat << endl;
-    #ifdef DEBUGLOG
+#ifdef DEBUGLOG
         log->LOG(&memberNode->addr, "Received a ping...");
-    #endif
+#endif
         
-        mle = (MemberListEntry *) malloc(sizeof(MemberListEntry));
         updateMLEFromValues(mle, &peeraddr, &heartbeat, &memberNode->heartbeat);
         addMember(mle);
-        free(mle);
+        sendPINGREP(&peeraddr);
+    } else if (msgHdr.msgType == PINGREP) {
+        cout<<"PINGREP: "<<peeraddr.getAddress()  <<" heartbeat: " << heartbeat << endl;
+#ifdef DEBUGLOG
+        log->LOG(&memberNode->addr, "Received a ping response...");
+#endif
+        
+        updateMLEFromValues(mle, &peeraddr, &heartbeat, &memberNode->heartbeat);
+        addMember(mle);
+        
+        // Clear the ping entry so there is no indirect ping sent
+        //eraseFromPingList(&peeraddr);
     }
-    
+    free(mle);
     return true;
     
 }
@@ -313,6 +325,20 @@ void MP1Node::nodeLoopOps() {
             memberNode->pingCounter--;
             
             if (memberNode->pingCounter == 0){
+                if (this->pingList.size() > 0) {
+                    // No response from ping
+                    if (memberNode->memberList.size() > 2){
+                        // There is another peer (other than me and the pingee) in the group that we can try...
+                        toind = rand() % memberNode->memberList.size();
+                        while (memberNode->memberList[toind].getid() == *(int *)(memberNode->addr.addr) ||
+                               memberNode->memberList[toind].getid() == *(int *)(this->pingList[0].addr)) {
+                            toind = rand() % memberNode->memberList.size();
+                        }
+                        *(int *)(&toaddr.addr)= (int) memberNode->memberList[toind].getid() ;
+                        *(short *)(&toaddr.addr[4]) = (short) memberNode->memberList[toind].getport();
+                        sendINDPING(&toaddr, &this->pingList[0]);
+                    }
+                }
                 // Check for outstanding pings
                 // If outstanding ping
                 //          - check for any joins or faileds
@@ -327,15 +353,17 @@ void MP1Node::nodeLoopOps() {
     if (memberNode->timeOutCounter <= 0) {
         memberNode->timeOutCounter = TIMEOUT;
         memberNode->pingCounter = TFAIL;
-        toind = rand() % memberNode->memberList.size();
-        while (memberNode->memberList[toind].getid() == *(int *)(memberNode->addr.addr)) {
+        if (memberNode->memberList.size() > 1){
+            // There is another peer (other than me) in the group that we can ping...
             toind = rand() % memberNode->memberList.size();
-        }
+            while (memberNode->memberList[toind].getid() == *(int *)(memberNode->addr.addr)) {
+                toind = rand() % memberNode->memberList.size();
+            }
 
-        *(int *)(&toaddr.addr)= (int) memberNode->memberList[toind].getid() ;
-        *(short *)(&toaddr.addr[4]) = (short) memberNode->memberList[toind].getport();
-        sendPING(&toaddr, memberNode->memberList);
-        
+            *(int *)(&toaddr.addr)= (int) memberNode->memberList[toind].getid() ;
+            *(short *)(&toaddr.addr[4]) = (short) memberNode->memberList[toind].getport();
+            sendPING(&toaddr, memberNode->memberList, true);
+        }
         
         
         // Check for outstanding indpings
@@ -364,6 +392,15 @@ int MP1Node::isNullAddress(Address *addr) {
 }
 
 /**
+ * FUNCTION NAME: isSameAddress
+ *
+ * DESCRIPTION: Function checks if the address is NULL
+ */
+int MP1Node::isSameAddress(Address *addr, Address *addr2) {
+    return (memcmp(addr->addr, addr2->addr, 6) == 0 ? 1 : 0);
+}
+
+/**
  * FUNCTION NAME: getJoinAddress
  *
  * DESCRIPTION: Returns the Address of the coordinator
@@ -388,12 +425,47 @@ void MP1Node::initMemberListTable(Member *memberNode) {
 }
 
 /**
+ * FUNCTION NAME: initPingList
+ *
+ * DESCRIPTION: Initialize the ping list
+ */
+void MP1Node::initPingList() {
+    this->pingList.clear();
+}
+
+/**
+ * FUNCTION NAME: initIndpingList
+ *
+ * DESCRIPTION: Initialize the indping list
+ */
+void MP1Node::initIndpingList() {
+    this->indpingList.clear();
+}
+
+/**
  * FUNCTION NAME: initFailedList
  *
  * DESCRIPTION: Initialize the failed list
  */
 void MP1Node::initFailedList() {
     this->failedList.clear();
+}
+
+/**
+ * FUNCTION NAME: eraseFromPingList
+ *
+ * DESCRIPTION: erase item from the ping list
+ */
+void MP1Node::eraseFromPingList(Address *peeraddr) {
+    int size = this->pingList.size();
+    auto begin = this->pingList.begin();
+    auto end = this->pingList.end();
+    for (int i = 0; i < this->pingList.size(); i++) {
+        if (isSameAddress(&(this->pingList[i]), peeraddr)){
+            this->pingList.erase(this->pingList.begin()+i);
+        }
+    }
+    
 }
 
 /**
@@ -502,13 +574,13 @@ void MP1Node::addMember(MemberListEntry *peer) {
 }
 
 /**
- * FUNCTION NAME: createMsgHeader
+ * FUNCTION NAME: createMessageHdr
  *
  * DESCRIPTION: Create a message header for the current member.  Memory for the message should
  *              have already been allocated.
  *
  */
-void MP1Node::createMessageHdr(MessageHdr *msg, MsgTypes msgtype, Address *addr, long *heartbeat, char **endptr){
+void MP1Node::createMessageHdr(MessageHdr *msg, MsgTypes msgtype, Address *addr, long heartbeat, char **endptr){
     
     *endptr = (char *)msg; // endptr points to the current end of data
     
@@ -516,7 +588,7 @@ void MP1Node::createMessageHdr(MessageHdr *msg, MsgTypes msgtype, Address *addr,
     *endptr +=  sizeof(int);
     memcpy((char *)(msg+1), addr->addr, sizeof(addr->addr));
     *endptr += sizeof(addr->addr) + 1;
-    memcpy((char *)(msg+1) + 1 + sizeof(addr->addr), heartbeat, sizeof(long));
+    memcpy((char *)(msg+1) + 1 + sizeof(addr->addr), &heartbeat, sizeof(long));
     *endptr += sizeof(long);
     
     return;
@@ -541,11 +613,11 @@ void MP1Node::sendJOINREP(Address *toaddr, std::vector<MemberListEntry> ml) {
 #endif
     
     size_t msgsize = sizeof(MessageHdr) + sizeof(toaddr->addr) + sizeof(long) + 1
-    + sizeof(MemberListEntry)*ml.size();
+    + (sizeof(int)+sizeof(short)+sizeof(long))*ml.size();
     msg = (MessageHdr *) malloc(msgsize * sizeof(char));
     
     // create JOINREP message: format of data is
-    createMessageHdr(msg, JOINREP, &memberNode->addr, &memberNode->heartbeat, &ptr);
+    createMessageHdr(msg, JOINREP, &memberNode->addr, memberNode->heartbeat, &ptr);
     for (int i = 0; i < ml.size(); i++) {
         mle = &ml[i];
         *ptr = (int) mle->getid();
@@ -581,7 +653,7 @@ void MP1Node::sendJOINREP(Address *toaddr, std::vector<MemberListEntry> ml) {
  *                  FAILED
  *                  failedpeer->addr
  */
-void MP1Node::sendPING(Address *toaddr, std::vector<MemberListEntry> ml) {
+void MP1Node::sendPING(Address *toaddr, std::vector<MemberListEntry> ml, bool fromme) {
     MessageHdr *msg;
     char *ptr;
     MemberListEntry *mle;
@@ -594,7 +666,7 @@ void MP1Node::sendPING(Address *toaddr, std::vector<MemberListEntry> ml) {
     msg = (MessageHdr *) malloc(msgsize * sizeof(char));
     
     // create PING message: format of data is
-    createMessageHdr(msg, PING, &memberNode->addr, &memberNode->heartbeat, &ptr);
+    createMessageHdr(msg, PING, &memberNode->addr, memberNode->heartbeat, &ptr);
     for (int i = 0; i < ml.size(); i++) {
         mle = &ml[i];
         *ptr = (int) mle->getid();
@@ -614,9 +686,89 @@ void MP1Node::sendPING(Address *toaddr, std::vector<MemberListEntry> ml) {
     
     // send JOINREP message to new peer
     emulNet->ENsend(&memberNode->addr, toaddr, (char *)msg, msgsize);
+    if (fromme) {
+        this->pingList.push_back(*toaddr);
+    }
     
     free(msg);
     
     return;
 }
 
+/**
+ * FUNCTION NAME: sendPINGREP
+ *
+ * DESCRIPTION: Send PINGREP message.   The message structure is:
+ *                  PINGREP
+ *                  memberNode->addr.addr
+ *                  memberNode->heartbeat
+ *                  FAILED
+ *                  failedpeer->addr
+ */
+void MP1Node::sendPINGREP(Address *toaddr) {
+    MessageHdr *msg;
+    char *ptr;
+    MemberListEntry *mle;
+#ifdef DEBUGLOG
+    static char s[1024];
+#endif
+    
+    size_t msgsize = sizeof(MessageHdr) + sizeof(toaddr->addr) + sizeof(long) + 1;
+    msg = (MessageHdr *) malloc(msgsize * sizeof(char));
+    
+    // create PING message: format of data is
+    createMessageHdr(msg, PINGREP, &memberNode->addr, memberNode->heartbeat, &ptr);
+    
+    cout << "Sending PINGREP: " << memberNode->addr.addr <<" heartbeat: " << memberNode->heartbeat << endl;
+#ifdef DEBUGLOG
+    sprintf(s, "Sending ping response...");
+    log->LOG(&memberNode->addr, s);
+#endif
+    
+    // send JOINREP message to new peer
+    emulNet->ENsend(&memberNode->addr, toaddr, (char *)msg, msgsize);
+    
+    free(msg);
+    
+    return;
+}
+
+
+/**
+ * FUNCTION NAME: sendINDPING
+ *
+ * DESCRIPTION: Send INDPING message.   The message structure is:
+ *                  INDPING
+ *                  memberNode->addr.addr
+ *                  memberNode->heartbeat
+                    peer->addr.addr
+ *                  FAILED
+ *                  failedpeer->addr
+ */
+void MP1Node::sendINDPING(Address *toaddr, Address *peeraddr) {
+    MessageHdr *msg;
+    char *ptr;
+    MemberListEntry *mle;
+#ifdef DEBUGLOG
+    static char s[1024];
+#endif
+    
+    size_t msgsize = sizeof(MessageHdr) + sizeof(toaddr->addr) + sizeof(long) + 1;
+    msg = (MessageHdr *) malloc(msgsize * sizeof(char));
+    
+    // create PING message: format of data is
+    createMessageHdr(msg, PINGREP, &memberNode->addr, memberNode->heartbeat, &ptr);
+    
+    cout << "Sending PINGREP: " << memberNode->addr.addr <<" heartbeat: " << memberNode->heartbeat << endl;
+#ifdef DEBUGLOG
+    sprintf(s, "Sending ping response...");
+    log->LOG(&memberNode->addr, s);
+#endif
+    
+    // send JOINREP message to new peer
+    emulNet->ENsend(&memberNode->addr, toaddr, (char *)msg, msgsize);
+    
+    free(msg);
+    
+    return;
+}

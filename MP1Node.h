@@ -62,9 +62,8 @@ private:
 	Params *par;
 	Member *memberNode;
 	char NULLADDR[6];
-    Address ping;
-    Address indping;
-    // Membership table
+    vector<Address> pingList;
+    vector<Address> indpingList;
     vector<Address> failedList;
 
 public:
@@ -83,18 +82,25 @@ public:
 	bool recvCallBack(void *env, char *data, int size);
 	void nodeLoopOps();
 	int isNullAddress(Address *addr);
+    int isSameAddress(Address *addr, Address *addr2);
 	Address getJoinAddress();
 	void initMemberListTable(Member *memberNode);
+    void initPingList();
+    void initIndpingList();
     void initFailedList();
+    void eraseFromPingList(Address *peeraddr);
+    void eraseFromIndpingList(Address *peeraddr);
 	void printAddress(Address *addr);
 	virtual ~MP1Node();
     void getSenderInfo(char *data, MessageHdr *msgHdr, Address *addr, long *heartbeat, char **endptr);
     void updateMLEFromValues(MemberListEntry *mle, Address *addr, long *heartbeat, long *timestamp);
     void getValuesFromMLE(MemberListEntry *mle, Address *addr, long *heartbeat, long *timestamp);
     void addMember(MemberListEntry *peer);
-    void createMessageHdr(MessageHdr *msg, MsgTypes msgtype, Address *addr, long *heartbeat, char **endptr);
+    void createMessageHdr(MessageHdr *msg, MsgTypes msgtype, Address *addr, long heartbeat, char **endptr);
     void sendJOINREP(Address *toaddr, std::vector<MemberListEntry> ml);
-    void sendPING(Address *toaddr, std::vector<MemberListEntry> ml);
+    void sendPING(Address *toaddr, std::vector<MemberListEntry> ml, bool fromme);
+    void sendPINGREP(Address *toaddr);
+    void sendINDPING(Address *toaddr, Address *peeraddr);
 };
 
 #endif /* _MP1NODE_H_ */
