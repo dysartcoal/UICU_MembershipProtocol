@@ -99,7 +99,7 @@ public:
     void removeMember(Address *peeraddr);
     void createMessageHdr(MessageHdr *msg, MsgTypes msgtype, Address *addr, long heartbeat, char **endptr);
     void sendJOINREP(Address *toaddr, std::vector<MemberListEntry> ml);
-    void sendPING(Address *toaddr, Address *fl, bool fromme);
+    void sendPING(Address *toaddr, std::vector<MemberListEntry> ml, Address *faddress, bool fromme);
     void sendPINGREP(Address *toaddr);
     void sendINDPING(Address *toaddr, Address *pingaddr, Address *fromaddr, Address *faddress);
     void sendINDPINGREP(Address *toaddr, Address *pingaddr, Address *fromaddr, Address *faddress);

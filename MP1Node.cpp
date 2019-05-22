@@ -291,7 +291,24 @@ bool MP1Node::recvCallBack(void *env, char *data, int size ) {
         
         updateMLEFromValues(mle, &peeraddr, &heartbeat, &memberNode->heartbeat);
         addMember(mle);
-        if (size == sizeof(int) + sizeof(peeraddr.addr) + sizeof(long) + sizeof(char[6]) + 1){
+        
+        // The next value is an integer stating the size of the membership list
+        membercnt = (int)*ptr;
+        ptr += sizeof(int);
+        
+        for (int i = 0; i < membercnt; i++) {
+            mle->setid((int) *ptr);
+            ptr += sizeof(int);
+            mle->setport((short) *ptr);
+            ptr += sizeof(short);
+            mle->setheartbeat((long) *ptr);
+            ptr += sizeof(long);
+            mle->settimestamp(memberNode->heartbeat);
+            addMember(mle);
+        }
+        
+        if (size == sizeof(int) + sizeof(peeraddr.addr) + sizeof(long) + sizeof(int) +
+                    membercnt*(sizeof(int) + sizeof(short) + sizeof(long)) + sizeof(char[6]) + 1){
             // There is information about a failed member attached.
             memcpy(failedaddr.addr, ptr, sizeof(char[6]));
             removeMember(&failedaddr);
@@ -463,7 +480,7 @@ void MP1Node::nodeLoopOps() {
 
             *(int *)(&toaddr.addr)= (int) memberNode->memberList[toind].getid() ;
             *(short *)(&toaddr.addr[4]) = (short) memberNode->memberList[toind].getport();
-            sendPING(&toaddr, &this->failedList, true);
+            sendPING(&toaddr, memberNode->memberList, &this->failedList, true);
             this->pingList = toaddr;
         }
     }
@@ -609,6 +626,7 @@ void MP1Node::addMember(MemberListEntry *peer) {
     MemberListEntry *mle;
     Address peeraddr;
     int i = 0;
+    int foundind = i;
     bool found = false;
     
     while (i < memberNode->memberList.size() && not(found)) {
@@ -616,14 +634,15 @@ void MP1Node::addMember(MemberListEntry *peer) {
             peer->getport()== memberNode->memberList[i].getport()) {
             cout<<"Found a match in the list"<<endl;
             found = true;
+            foundind = i;
         }
         i++;
     }
     
     if (found) {
         // Update existing member
-        memberNode->memberList[i].setheartbeat(peer->getheartbeat());
-        memberNode->memberList[i].settimestamp(memberNode->heartbeat);
+        memberNode->memberList[foundind].setheartbeat(peer->getheartbeat());
+        memberNode->memberList[foundind].settimestamp(memberNode->heartbeat);
     } else {
         // Add new member to the list
         mle = (MemberListEntry *) malloc (sizeof(MemberListEntry));
@@ -635,6 +654,7 @@ void MP1Node::addMember(MemberListEntry *peer) {
         *(int *)peeraddr.addr = (int) peer->getid();
         *(short *)&peeraddr.addr[4] = (short) peer->getport();
         log->logNodeAdd(&(memberNode->addr), &peeraddr );
+        free(mle);
     }
     
     return;
@@ -741,14 +761,17 @@ void MP1Node::sendJOINREP(Address *toaddr, std::vector<MemberListEntry> ml) {
  *                  FAILED
  *                  failedpeer->addr
  */
-void MP1Node::sendPING(Address *toaddr, Address *faddress, bool fromme) {
+void MP1Node::sendPING(Address *toaddr, std::vector<MemberListEntry> ml, Address *faddress, bool fromme) {
     MessageHdr *msg;
     char *ptr;
+    MemberListEntry *mle;
 #ifdef DEBUGLOG
     static char s[1024];
 #endif
     
     size_t msgsize = sizeof(MessageHdr) + sizeof(toaddr->addr) + sizeof(long) + 1;
+    // Add on size of an int plus the number of members in the list
+    msgsize += sizeof(int) + ml.size()*(sizeof(int) + sizeof(short) + sizeof(long));
     if (not isNullAddress(faddress)) {
         msgsize += sizeof(char[6]);
     }
@@ -756,12 +779,27 @@ void MP1Node::sendPING(Address *toaddr, Address *faddress, bool fromme) {
     
     // create PING message: format of data is
     createMessageHdr(msg, PING, &memberNode->addr, memberNode->heartbeat, &ptr);
+    
+    // ptr points to the end of the message header so fill data from there
+    // write an int with number of members
+    *ptr = (int) ml.size();
+    ptr += sizeof(int);
+    
+    for (int i = 0; i < ml.size(); i++) {
+        mle = &ml[i];
+        *ptr = (int) mle->getid();
+        ptr += sizeof(int);
+        *ptr = (short) mle->getport();
+        ptr += sizeof(short);
+        *ptr = (long) mle->getheartbeat();
+        ptr += sizeof(long);
+    }
+    
     // ptr points to the end of the header message so start filling data from there.
     if (not isNullAddress(faddress)){
         memcpy(ptr, faddress->addr, sizeof(char[6]));
         ptr += sizeof(char[6]);
     }
-    
     
     cout << "Sending PING: " << memberNode->addr.addr <<" heartbeat: " << memberNode->heartbeat << endl;
 #ifdef DEBUGLOG
