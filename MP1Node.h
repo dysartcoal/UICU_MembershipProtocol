@@ -63,8 +63,12 @@ private:
 	Member *memberNode;
 	char NULLADDR[6];
     Address pingList;
-    vector<Address> indpingList;
     Address failedList;
+    Address failedList1;
+    Address failedList2;
+    Address failedList3;
+    Address failedList4;
+    int cntfailed;
 
 public:
 	MP1Node(Member *, Params *, EmulNet *, Log *, Address *);
@@ -86,10 +90,8 @@ public:
 	Address getJoinAddress();
 	void initMemberListTable(Member *memberNode);
     void initPingList();
-    void initIndpingList();
     void initFailedList();
     void eraseFromPingList();
-    void eraseFromIndpingList(Address *peeraddr);
 	void printAddress(Address *addr);
 	virtual ~MP1Node();
     void getSenderInfo(char *data, MessageHdr *msgHdr, Address *addr, long *heartbeat, char **endptr);
@@ -97,6 +99,7 @@ public:
     void getValuesFromMLE(MemberListEntry *mle, Address *addr, long *heartbeat, long *timestamp);
     void addMember(MemberListEntry *peer);
     void removeMember(Address *peeraddr);
+    void addFailed(Address *addr);
     void createMessageHdr(MessageHdr *msg, MsgTypes msgtype, Address *addr, long heartbeat, char **endptr);
     void sendJOINREP(Address *toaddr, std::vector<MemberListEntry> ml);
     void sendPING(Address *toaddr, std::vector<MemberListEntry> ml, Address *faddress, bool fromme);
