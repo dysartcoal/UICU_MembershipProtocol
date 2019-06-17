@@ -20,6 +20,7 @@
  */
 #define TREMOVE 20
 #define TFAIL 5
+#define TIMEOUT 15
 
 /*
  * Note: You can change/add any functions in MP1Node.{h,cpp}
@@ -31,6 +32,12 @@
 enum MsgTypes{
     JOINREQ,
     JOINREP,
+    PING,
+    INDPING,
+    PINGREP,
+    INDPINGREP,
+    JOINED,
+    FAILED,
     DUMMYLASTMSGTYPE
 };
 
@@ -55,6 +62,13 @@ private:
 	Params *par;
 	Member *memberNode;
 	char NULLADDR[6];
+    Address pingList;
+    Address failedList;
+    Address failedList1;
+    Address failedList2;
+    Address failedList3;
+    Address failedList4;
+    int cntfailed;
 
 public:
 	MP1Node(Member *, Params *, EmulNet *, Log *, Address *);
@@ -72,10 +86,26 @@ public:
 	bool recvCallBack(void *env, char *data, int size);
 	void nodeLoopOps();
 	int isNullAddress(Address *addr);
+    int isSameAddress(Address *addr, Address *addr2);
 	Address getJoinAddress();
 	void initMemberListTable(Member *memberNode);
+    void initPingList();
+    void initFailedList();
+    void eraseFromPingList();
 	void printAddress(Address *addr);
 	virtual ~MP1Node();
+    void getSenderInfo(char *data, MessageHdr *msgHdr, Address *addr, long *heartbeat, char **endptr);
+    void updateMLEFromValues(MemberListEntry *mle, Address *addr, long *heartbeat, long *timestamp);
+    void getValuesFromMLE(MemberListEntry *mle, Address *addr, long *heartbeat, long *timestamp);
+    void addMember(MemberListEntry *peer);
+    void removeMember(Address *peeraddr);
+    void addFailed(Address *addr);
+    void createMessageHdr(MessageHdr *msg, MsgTypes msgtype, Address *addr, long heartbeat, char **endptr);
+    void sendJOINREP(Address *toaddr, std::vector<MemberListEntry> ml);
+    void sendPING(Address *toaddr, std::vector<MemberListEntry> ml, Address *faddress, bool fromme);
+    void sendPINGREP(Address *toaddr);
+    void sendINDPING(Address *toaddr, Address *pingaddr, Address *fromaddr, Address *faddress);
+    void sendINDPINGREP(Address *toaddr, Address *pingaddr, Address *fromaddr, Address *faddress);
 };
 
 #endif /* _MP1NODE_H_ */
