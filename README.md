@@ -1,6 +1,6 @@
 # Cloud Computing Concepts
 
-The aim of the project was to implement a membership and failure detection protocol.
+The aim of the project was to implement a distributed membership and failure detection protocol.
 
 This project passed all of the tests when submitted so I was extremely chuffed.  I used a SWIM style membership and failure detection protocol as recommended by the course notes so that I could learn more than by simply implementing an all-to-all heartbeat.
 
